@@ -1,0 +1,37 @@
+# Secrets & auth (never commit)
+/private/
+*.session
+*.session-journal
+mcp.env
+*.env
+!.env.example
+
+# Local runtime settings (use config.example.json as the template)
+/config.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# QR login / temp
+/qr/
+*.png
+!docs/**
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Runtime logs
+/logs/
+*.log
