@@ -13,8 +13,9 @@ Path on the box: `/workspace/telegram`.
 | | `telegram_login_2fa` | Cloud password from env `TG_2FA_PASSWORD` (never a tool argument). |
 | | `telegram_logout` | Log out and delete the local session. |
 | **Read** | `telegram_list_dialogs` | Dialogs: name, id, username, unread, type. `limit` 1–100. |
-| | `telegram_get_messages` | Chat history. `days` (calendar days Europe/Moscow, default from config), `limit`, `mark_read`. |
+| | `telegram_get_messages` | Chat history. `days` (calendar days Europe/Moscow, default from config), `limit`, `mark_read`. Messages include sender (groups), media kind/caption, links, buttons. |
 | | `telegram_mark_read` | Mark a chat read without fetching messages. |
+| **Buttons** | `telegram_press_button` | Resolve a button by index or text; `dry_run=true` default. Callback presses only with explicit user consent; url buttons are never opened. |
 | **Write** | `telegram_send_message` | Send text. With `robot_prefix_enabled`, prefixes emoji. |
 
 **`chat`:** username, `@handle`, numeric id, or `me` (Saved Messages).
