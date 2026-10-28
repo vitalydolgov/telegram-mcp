@@ -5,7 +5,7 @@ Coherent MVP tool set:
   Auth:    telegram_whoami, telegram_login_qr, telegram_login_2fa, telegram_logout
   Read:    telegram_list_dialogs, telegram_get_messages, telegram_mark_read
   Buttons: telegram_press_button (dry_run by default)
-  Write:   telegram_send_message
+  Write:   telegram_send_message, telegram_send_file
 
 Secrets in env / private/mcp.env only. Never print api_hash / 2FA / session.
 """
@@ -46,7 +46,7 @@ mcp = MCPServer(
         "(→ telegram_login_2fa if need_2fa) → telegram_logout. "
         "Read: telegram_list_dialogs, telegram_get_messages, telegram_mark_read. "
         "Buttons: telegram_press_button (dry_run=true default; press only with explicit user consent). "
-        "Write: telegram_send_message. "
+        "Write: telegram_send_message, telegram_send_file (local file + optional caption). "
         "chat: username, @handle, numeric id, or 'me'. Times Europe/Moscow. "
         "robot_prefix_enabled in config.json prefixes every send. "
         "Secrets only via env (TG_API_ID, TG_API_HASH, optional TG_2FA_PASSWORD)."
@@ -526,6 +526,76 @@ async def telegram_send_message(chat: str, text: str) -> dict[str, Any]:
             "time_msk": _fmt_msk(msg.date),
             "text": final,
             "robot_prefix_applied": final != text,
+        }
+
+
+_MAX_FILE_BYTES = 2000 * 1024 * 1024
+_PRIVATE_DIR = os.path.realpath(os.path.join(_BASE, "private"))
+
+
+def _check_send_path(path: str) -> str:
+    if not path or not os.path.isabs(str(path)):
+        raise ValueError("path must be an absolute path")
+    real = os.path.realpath(str(path))
+    name = os.path.basename(real)
+    if (
+        real == _PRIVATE_DIR
+        or real.startswith(_PRIVATE_DIR + os.sep)
+        or name.endswith(".session")
+        or name == "mcp.env"
+    ):
+        raise PermissionError("refused: path points to a protected secret location")
+    if not os.path.exists(real):
+        raise FileNotFoundError("file does not exist")
+    if not os.path.isfile(real):
+        raise ValueError("path is not a regular file")
+    if not os.access(real, os.R_OK):
+        raise PermissionError("file is not readable")
+    size = os.path.getsize(real)
+    if size <= 0:
+        raise ValueError("file is empty")
+    if size > _MAX_FILE_BYTES:
+        raise ValueError("file exceeds 2000 MB limit")
+    return real
+
+
+@mcp.tool(
+    description=(
+        "Send a file from this machine to a chat (username/@handle/id/'me') with optional caption. "
+        "Robot prefix applies to the caption. as_document=true sends images/videos uncompressed. "
+        "Only send to real people with explicit user consent; tests go to 'me'."
+    )
+)
+async def telegram_send_file(
+    chat: str, path: str, caption: str = "", as_document: bool = False
+) -> dict[str, Any]:
+    log.info(
+        "tool telegram_send_file start chat=%s as_document=%s caption_len=%s",
+        chat, as_document, len(str(caption)) if caption else 0,
+    )
+    real = _check_send_path(path)
+    size = os.path.getsize(real)
+    caption = "" if caption is None else str(caption)
+    final = _apply_robot_prefix(caption).rstrip() if caption == "" else _apply_robot_prefix(caption)
+    async with tg_client.client() as c:
+        target = await _resolve(c, chat)
+        entity = await c.get_entity(target)
+        ref = (
+            {"id": "me", "name": "Saved Messages", "type": "saved"}
+            if target == "me"
+            else _entity_ref(entity)
+        )
+        msg = await c.send_file(target, real, caption=final, force_document=bool(as_document))
+        med = _media(msg) or {}
+        return {
+            "sent_to": ref,
+            "message_id": msg.id,
+            "time_msk": _fmt_msk(msg.date),
+            "file_name": os.path.basename(real),
+            "size_bytes": size,
+            "media_kind": med.get("kind"),
+            "caption": final,
+            "robot_prefix_applied": final != caption,
         }
 
 

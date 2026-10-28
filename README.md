@@ -17,6 +17,7 @@ Path on the box: `/workspace/telegram`.
 | | `telegram_mark_read` | Mark a chat read without fetching messages. |
 | **Buttons** | `telegram_press_button` | Resolve a button by index or text; `dry_run=true` default. Callback presses only with explicit user consent; url buttons are never opened. |
 | **Write** | `telegram_send_message` | Send text. With `robot_prefix_enabled`, prefixes emoji. |
+| **Write** | `telegram_send_file` | Send a local file (absolute path, <= 2000 MB) with optional caption; robot prefix on caption; `as_document` sends media uncompressed. Refuses secrets (`private/`, `*.session`, `mcp.env`). |
 
 **`chat`:** username, `@handle`, numeric id, or `me` (Saved Messages).
 
