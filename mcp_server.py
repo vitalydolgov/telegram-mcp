@@ -4,7 +4,7 @@
 Coherent MVP tool set:
   Auth:    telegram_whoami, telegram_login_qr, telegram_login_2fa, telegram_logout
   Read:    telegram_list_dialogs, telegram_get_messages, telegram_mark_read
-  Buttons: telegram_press_button (dry_run by default)
+  Buttons: telegram_press_button
   Write:   telegram_send_message, telegram_send_file
   Membership: telegram_join_channel, telegram_leave_channel
   Folders: telegram_list_folders, telegram_folder_include, telegram_folder_exclude
@@ -52,7 +52,7 @@ mcp = MCPServer(
         "Auth: telegram_whoami; login: telegram_login_qr "
         "(→ telegram_login_2fa if need_2fa) → telegram_logout. "
         "Read: telegram_list_dialogs, telegram_get_messages, telegram_mark_read. "
-        "Buttons: telegram_press_button (dry_run=true default; press only with explicit user consent). "
+        "Buttons: telegram_press_button (callback presses with explicit user consent; url/webapp return url only, never opened). "
         "Write: telegram_send_message, telegram_send_file (local file + optional caption). "
         "Membership: telegram_join_channel / telegram_leave_channel "
         "(public @username, t.me link, or invite t.me/+hash). "
@@ -505,20 +505,18 @@ async def telegram_mark_read(chat: str) -> dict[str, Any]:
 
 @mcp.tool(
     description=(
-        "Resolve (and optionally press) a button on a message. button: flat index "
+        "Press a button on a message. button: flat index "
         "(digits, as in telegram_get_messages buttons[].index) or button text "
-        "(exact, then case-insensitive). dry_run=true (default) only shows the button "
-        "and what would happen. ONLY call with dry_run=false after explicit user consent. "
-        "dry_run=false: callback buttons send GetBotCallbackAnswer and return the bot "
-        "answer; url/webapp buttons are never opened, the url is returned; other kinds "
-        "are refused."
+        "(exact, then case-insensitive). Callback buttons send GetBotCallbackAnswer "
+        "and return the bot answer; url/webapp/url_auth buttons are never opened — "
+        "the url is returned; other kinds are refused."
     )
 )
 async def telegram_press_button(
-    chat: str, message_id: int, button: str, dry_run: bool = True
+    chat: str, message_id: int, button: str
 ) -> dict[str, Any]:
-    log.info("tool telegram_press_button start chat=%s message_id=%s button=%s dry_run=%s",
-             chat, message_id, button, dry_run)
+    log.info("tool telegram_press_button start chat=%s message_id=%s button=%s",
+             chat, message_id, button)
     from telethon.tl import functions
     async with tg_client.client() as c:
         target = await _resolve(c, chat)
@@ -542,15 +540,9 @@ async def telegram_press_button(
             raise ValueError(f"button not found: {key!r}; available: {[b['text'] for b in btns]}")
         info = _public_buttons([chosen])[0]
         kind = info["kind"]
-        if kind == "callback":
-            action = "would send a callback query to the bot"
-        elif kind in ("url", "webapp", "url_auth"):
-            action = "link only; nothing is opened, the url is returned"
-        else:
-            action = f"unsupported kind {kind!r}; pressing would be refused"
-        res: dict[str, Any] = {"chat": chat, "message_id": m.id, "button": info,
-                               "dry_run": bool(dry_run), "action": action}
-        if dry_run:
+        res: dict[str, Any] = {"chat": chat, "message_id": m.id, "button": info}
+        if kind in ("url", "webapp", "url_auth"):
+            res["result"] = {"link": info.get("url")}
             return res
         if kind != "callback":
             raise ValueError(f"pressing buttons of kind {kind!r} is not supported")
