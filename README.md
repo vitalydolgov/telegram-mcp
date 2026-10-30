@@ -2,7 +2,7 @@
 
 Local MCP for Grok Bot: Telegram **user API** (MTProto) via **Telethon** + **WSS** (works through HTTP-only egress). Personal account — not Bot API.
 
-Path on the box: `/workspace/telegram`.
+Path on the box: `/workspace/telegram-mcp`.
 
 ## Operations (MVP)
 
@@ -86,7 +86,7 @@ Never put these in chat, `config.json`, or git.
 
 Connect in Grok Bot (AddMcpServer):
 
-- **command:** `/workspace/telegram/mcp_launch.sh`
+- **command:** `/workspace/telegram-mcp/mcp_launch.sh`
 - **args:** `[]`
 - **name:** `grokbot-telegram-mcp`
 
