@@ -9,7 +9,7 @@ Path on the box: `/workspace/telegram`.
 | Group | Tool | Role |
 |-------|------|------|
 | **Auth** | `telegram_whoami` | Current account (`get_me`). Errors if not logged in. |
-| | `telegram_login_qr` | QR / `tg://login` (+ PNG). `wait_seconds` 0–55. Statuses: `pending` \| `authorized` \| `need_2fa` \| `already_authorized`. |
+| | `telegram_login_qr` | QR PNG written to `var/qr/login.png` (path only; the `tg://` token is not returned). `wait_seconds` 0–55. Statuses: `pending` \| `authorized` \| `need_2fa` \| `already_authorized`. |
 | | `telegram_login_2fa` | Cloud password from env `TG_2FA_PASSWORD` (never a tool argument). |
 | | `telegram_logout` | Log out and delete the local session. |
 | **Read** | `telegram_list_dialogs` | Dialogs: name, id, username, unread, type. `limit` 1–100. |
@@ -17,7 +17,7 @@ Path on the box: `/workspace/telegram`.
 | | `telegram_mark_read` | Mark a chat read without fetching messages. |
 | **Buttons** | `telegram_press_button` | Press a button by index or text. Callback presses the button; url/webapp buttons return the url only and are never opened. |
 | **Write** | `telegram_send_message` | Send text. With `robot_prefix_enabled`, prefixes emoji. |
-| **Write** | `telegram_send_file` | Send a local file (absolute path, <= 2000 MB) with optional caption; robot prefix on caption; `as_document` sends media uncompressed. Refuses secrets (`private/`, `*.session`, `mcp.env`). |
+| **Write** | `telegram_send_file` | Send a local file (absolute path, <= 2000 MB) with optional caption; robot prefix on caption; `as_document` sends media uncompressed. Refuses `var/`, `logs/`, session files, and secret filenames (`.env`, keys). |
 | **Membership** | `telegram_join_channel` | Join public `@username` / `t.me/name` or invite `t.me/+hash`. |
 | | `telegram_leave_channel` | Leave channel/supergroup/basic group. |
 | **Folders** | `telegram_list_folders` | List chat folders (dialog filters): id, title, counts; `with_peers` lists peer ids. |
@@ -30,7 +30,7 @@ Path on the box: `/workspace/telegram`.
 
 ### Typical flows
 
-1. **First login:** `login_qr` → scan / open `url` → if `need_2fa` → set `TG_2FA_PASSWORD` in env → `login_2fa` → `whoami`.
+1. **First login:** `login_qr` → scan `var/qr/login.png` → if `need_2fa` → set `TG_2FA_PASSWORD` in env → `login_2fa` → `whoami`.
 2. **Read today's chat:** `get_messages(chat=…)` (default `history_days=1`). To mark read: `mark_read=true`.
 3. **Clear unread only:** `mark_read(chat=…)`.
 4. **Send:** `send_message(chat=…, text=…)`. Default tests go to `me`.
@@ -42,7 +42,7 @@ Path on the box: `/workspace/telegram`.
 
 - Telethon 1.x, `ConnectionWSSObfuscated` → `wss://*.web.telegram.org/apiws`
 - MCP stdio (`mcp_server.py`), launcher `mcp_launch.sh`
-- SQLite session: `private/me.session`
+- SQLite session: `var/me.session`
 
 ## Config
 
@@ -67,18 +67,17 @@ Never put these in chat, `config.json`, or git.
 
 | What | Where | Mode |
 |------|-------|------|
-| `TG_API_ID` / `TG_API_HASH` | Connector secrets (env); fallback `private/mcp.env` | `600` (file) |
-| Session | `private/me.session` | `600` |
+| `TG_API_ID` / `TG_API_HASH` | Process environment (connector secrets) | — |
+| Session | `var/me.session` | `600` |
 | 2FA (login only) | env `TG_2FA_PASSWORD` | — |
-| Directory | `private/` | `700` |
+| Directory | `var/` | `700` |
 
-`mcp_launch.sh` uses `TG_API_ID` / `TG_API_HASH` from the connector's environment (set them as key-value secrets in the connector settings). Only if either is missing does it source `private/mcp.env`.
+`mcp_launch.sh` uses `TG_API_ID` / `TG_API_HASH` from the process environment (set them as key-value secrets in the connector settings). It does not read a secrets file. Names are in [.env.example](.env.example). It starts from its own directory.
 
 ## Run
 
 ```bash
-# smoke (needs live session + keys in env)
-set -a && source private/mcp.env && set +a
+# smoke (needs live session + TG_API_ID / TG_API_HASH in the environment)
 .venv/bin/python mcp_server.py --smoke
 
 # MCP stdio
@@ -103,7 +102,8 @@ Connect in Grok Bot (AddMcpServer):
 | `tg_settings.py` | `config.json` |
 | `tg_log.py` | file + stderr logging |
 | `config.example.json` | settings template |
-| `private/` | secrets + session (gitignored) |
+| `.env.example` | env var names (not loaded) |
+| `var/` | session (gitignored) |
 
 ## Logs
 

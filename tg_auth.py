@@ -1,19 +1,13 @@
 """QR login + logout helpers. Never print secrets."""
 from __future__ import annotations
-import asyncio, base64, io, os, time
+import asyncio, os, time
 from typing import Any
 import qrcode
 from telethon.errors import SessionPasswordNeededError
 import tg_client
 import tg_log
 
-QR_DIR = os.path.join(tg_client.BASE, "qr")
-
-def _png_b64(url: str) -> str:
-    img = qrcode.make(url)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+QR_DIR = os.path.join(tg_client.PRIV, "qr")
 
 def _save_png(url: str) -> str:
     os.makedirs(QR_DIR, exist_ok=True)
@@ -52,13 +46,12 @@ async def login_qr(wait_seconds: int = 25) -> dict[str, Any]:
             }
         qr = await c.qr_login()
         path = _save_png(qr.url)
+        # The tg:// token is a login credential. Keep it in the PNG only.
         payload = {
             "status": "pending",
-            "url": qr.url,
             "qr_png_path": path,
-            "qr_png_base64": _png_b64(qr.url),
             "expires_in": max(0, int(qr.expires.timestamp() - time.time())),
-            "hint": "Open Telegram → Settings → Devices → Link Desktop Device, or open the tg:// url within ~30s.",
+            "hint": "Open Telegram → Settings → Devices → Link Desktop Device and scan qr_png_path. It expires in ~30s.",
         }
         if wait_seconds <= 0:
             return payload

@@ -32,11 +32,11 @@ They belong only in:
 
 | What | Where | Mode |
 |------|-------|------|
-| API keys | `private/mcp.env` (`TG_API_ID`, `TG_API_HASH`) | `600` |
-| Session | `private/me.session` | `600` |
-| Directory | `private/` | `700` |
+| API keys | Process environment (`TG_API_ID`, `TG_API_HASH`) | — |
+| Session | `var/me.session` | `600` |
+| Directory | `var/` | `700` |
 
-MCP launcher: `mcp_launch.sh` (sources `private/mcp.env`).
+MCP launcher: `mcp_launch.sh` (requires `TG_API_ID` and `TG_API_HASH` in the environment; does not read a secrets file).
 
 ## Tools
 

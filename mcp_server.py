@@ -9,7 +9,7 @@ Coherent MVP tool set:
   Membership: telegram_join_channel, telegram_leave_channel
   Folders: telegram_list_folders, telegram_folder_include, telegram_folder_exclude
 
-Secrets in env / private/mcp.env only. Never print api_hash / 2FA / session.
+Secrets in the process environment only. Never print api_hash / 2FA / session.
 """
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ if _BASE not in sys.path:
     sys.path.insert(0, _BASE)
 
 from mcp.server.mcpserver import MCPServer
+from telethon.errors import InviteRequestSentError
 from telethon.tl.types import User, Chat, Channel, ChatInviteAlready, ChatInvite, ChatInvitePeek
 from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
@@ -381,14 +382,13 @@ async def telegram_whoami() -> dict[str, Any]:
             "username": me.username,
             "first_name": me.first_name,
             "last_name": me.last_name,
-            "phone": me.phone,
         }
 
 
 @mcp.tool(
     description=(
-        "QR login. Returns tg://login url + PNG (path + base64). "
-        "wait_seconds 0–55 to wait for scan. "
+        "QR login. Writes a PNG under var/qr and returns that path only "
+        "(not the tg:// token). wait_seconds 0–55 to wait for scan. "
         "Statuses: pending | authorized | need_2fa | already_authorized."
     )
 )
@@ -701,14 +701,29 @@ async def telegram_join_channel(channel: str) -> dict[str, Any]:
                     "via": "invite",
                     "channel": _entity_ref(preview.chat),
                 }
-            updates = await c(ImportChatInviteRequest(hash=inv))
+            if isinstance(preview, ChatInvite) and preview.request_needed:
+                return {
+                    "joined": False,
+                    "via": "invite",
+                    "request_needed": True,
+                    "title": preview.title,
+                }
+            try:
+                updates = await c(ImportChatInviteRequest(hash=inv))
+            except InviteRequestSentError:
+                return {
+                    "joined": False,
+                    "via": "invite",
+                    "request_needed": True,
+                    "title": getattr(preview, "title", None),
+                }
             chats = getattr(updates, "chats", None) or []
             entity = chats[0] if chats else None
             return {
                 "joined": True,
                 "via": "invite",
                 "channel": _entity_ref(entity) if entity else None,
-                "request_needed": bool(getattr(preview, "request_needed", False)),
+                "request_needed": False,
             }
         uname = _public_username(channel)
         target = uname if uname else await _resolve(c, channel)
@@ -871,20 +886,50 @@ async def telegram_send_message(chat: str, text: str) -> dict[str, Any]:
 
 
 _MAX_FILE_BYTES = 2000 * 1024 * 1024
-_PRIVATE_DIR = os.path.realpath(os.path.join(_BASE, "private"))
+_VAR_DIR = os.path.realpath(os.path.join(_BASE, "var"))
+_LOG_DIR = os.path.realpath(os.path.join(_BASE, "logs"))
+_SECRET_NAMES = {
+    ".env",
+    ".netrc",
+    ".pgpass",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "credentials",
+    "credentials.json",
+    "secrets.json",
+    "service-account.json",
+}
+_SECRET_SUFFIXES = (
+    ".session",
+    ".session-journal",
+    ".env",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+)
+
+
+def _secret_path(real: str) -> bool:
+    name = os.path.basename(real)
+    lower = name.lower()
+    if lower in _SECRET_NAMES or lower.startswith(".env"):
+        return True
+    if lower.endswith(_SECRET_SUFFIXES):
+        return True
+    for root in (_VAR_DIR, _LOG_DIR):
+        if real == root or real.startswith(root + os.sep):
+            return True
+    return False
 
 
 def _check_send_path(path: str) -> str:
     if not path or not os.path.isabs(str(path)):
         raise ValueError("path must be an absolute path")
     real = os.path.realpath(str(path))
-    name = os.path.basename(real)
-    if (
-        real == _PRIVATE_DIR
-        or real.startswith(_PRIVATE_DIR + os.sep)
-        or name.endswith(".session")
-        or name == "mcp.env"
-    ):
+    if _secret_path(real):
         raise PermissionError("refused: path points to a protected secret location")
     if not os.path.exists(real):
         raise FileNotFoundError("file does not exist")
@@ -904,6 +949,7 @@ def _check_send_path(path: str) -> str:
     description=(
         "Send a file from this machine to a chat (username/@handle/id/'me') with optional caption. "
         "Robot prefix applies to the caption. as_document=true sends images/videos uncompressed. "
+        "Refuses var/, logs/, session files, and secret filenames. "
         "Only send to real people with explicit user consent; tests go to 'me'."
     )
 )

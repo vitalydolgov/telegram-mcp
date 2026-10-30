@@ -1,8 +1,6 @@
-# Secrets & auth (never commit)
-/private/
+/var/
 *.session
 *.session-journal
-mcp.env
 *.env
 !.env.example
 
