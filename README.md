@@ -18,6 +18,11 @@ Path on the box: `/workspace/telegram`.
 | **Buttons** | `telegram_press_button` | Resolve a button by index or text; `dry_run=true` default. Callback presses only with explicit user consent; url buttons are never opened. |
 | **Write** | `telegram_send_message` | Send text. With `robot_prefix_enabled`, prefixes emoji. |
 | **Write** | `telegram_send_file` | Send a local file (absolute path, <= 2000 MB) with optional caption; robot prefix on caption; `as_document` sends media uncompressed. Refuses secrets (`private/`, `*.session`, `mcp.env`). |
+| **Membership** | `telegram_join_channel` | Join public `@username` / `t.me/name` or invite `t.me/+hash`. |
+| | `telegram_leave_channel` | Leave channel/supergroup/basic group. |
+| **Folders** | `telegram_list_folders` | List chat folders (dialog filters): id, title, counts; `with_peers` lists peer ids. |
+| | `telegram_folder_include` | Add chat to folder include list. `folder` id/title, `chat` username/id. |
+| | `telegram_folder_exclude` | Add chat to folder exclude list. |
 
 **`chat`:** username, `@handle`, numeric id, or `me` (Saved Messages).
 
@@ -29,7 +34,9 @@ Path on the box: `/workspace/telegram`.
 2. **Read today's chat:** `get_messages(chat=…)` (default `history_days=1`). To mark read: `mark_read=true`.
 3. **Clear unread only:** `mark_read(chat=…)`.
 4. **Send:** `send_message(chat=…, text=…)`. Default tests go to `me`.
-5. **Leave:** `logout`.
+5. **Leave account:** `logout`.
+6. **Join / leave channel:** `join_channel(channel=…)` / `leave_channel(channel=…)`.
+7. **Folders:** `list_folders` → `folder_include` / `folder_exclude`.
 
 ## Stack
 

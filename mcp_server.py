@@ -6,6 +6,8 @@ Coherent MVP tool set:
   Read:    telegram_list_dialogs, telegram_get_messages, telegram_mark_read
   Buttons: telegram_press_button (dry_run by default)
   Write:   telegram_send_message, telegram_send_file
+  Membership: telegram_join_channel, telegram_leave_channel
+  Folders: telegram_list_folders, telegram_folder_include, telegram_folder_exclude
 
 Secrets in env / private/mcp.env only. Never print api_hash / 2FA / session.
 """
@@ -25,7 +27,12 @@ if _BASE not in sys.path:
     sys.path.insert(0, _BASE)
 
 from mcp.server.mcpserver import MCPServer
-from telethon.tl.types import User, Chat, Channel
+from telethon.tl.types import User, Chat, Channel, ChatInviteAlready, ChatInvite, ChatInvitePeek
+from telethon.tl.functions.channels import JoinChannelRequest, LeaveChannelRequest
+from telethon.tl.functions.messages import ImportChatInviteRequest, CheckChatInviteRequest
+from telethon.tl.functions.messages import DeleteChatUserRequest
+from telethon.tl.functions.messages import GetDialogFiltersRequest, UpdateDialogFilterRequest
+from telethon.tl.types import InputUserSelf, DialogFilter, TextWithEntities
 
 import tg_auth
 import tg_client
@@ -47,6 +54,10 @@ mcp = MCPServer(
         "Read: telegram_list_dialogs, telegram_get_messages, telegram_mark_read. "
         "Buttons: telegram_press_button (dry_run=true default; press only with explicit user consent). "
         "Write: telegram_send_message, telegram_send_file (local file + optional caption). "
+        "Membership: telegram_join_channel / telegram_leave_channel "
+        "(public @username, t.me link, or invite t.me/+hash). "
+        "Folders: telegram_list_folders; telegram_folder_include / telegram_folder_exclude "
+        "(folder id or title). "
         "chat: username, @handle, numeric id, or 'me'. Times Europe/Moscow. "
         "robot_prefix_enabled in config.json prefixes every send. "
         "Secrets only via env (TG_API_ID, TG_API_HASH, optional TG_2FA_PASSWORD)."
@@ -119,6 +130,70 @@ async def _resolve(c, chat: str):
         return int(chat)
     return chat
 
+
+
+def _invite_hash(channel: str) -> str | None:
+    """Extract invite hash from +HASH, t.me/+HASH, t.me/joinchat/HASH, or bare hash with +."""
+    s = (channel or "").strip()
+    if not s:
+        return None
+    for prefix in (
+        "https://t.me/+",
+        "http://t.me/+",
+        "t.me/+",
+        "https://telegram.me/+",
+        "http://telegram.me/+",
+        "telegram.me/+",
+        "https://t.me/joinchat/",
+        "http://t.me/joinchat/",
+        "t.me/joinchat/",
+        "https://telegram.me/joinchat/",
+        "http://telegram.me/joinchat/",
+        "telegram.me/joinchat/",
+    ):
+        if s.lower().startswith(prefix):
+            h = s[len(prefix):].split("?")[0].split("/")[0].strip()
+            return h or None
+    if s.startswith("+") and len(s) > 1 and "/" not in s:
+        return s[1:].strip() or None
+    return None
+
+
+def _public_username(channel: str) -> str | None:
+    s = (channel or "").strip()
+    if not s:
+        return None
+    for prefix in (
+        "https://t.me/",
+        "http://t.me/",
+        "t.me/",
+        "https://telegram.me/",
+        "http://telegram.me/",
+        "telegram.me/",
+    ):
+        if s.lower().startswith(prefix):
+            rest = s[len(prefix):].split("?")[0].split("/")[0].strip()
+            if rest.startswith("+") or rest.lower() == "joinchat":
+                return None
+            return rest.lstrip("@") or None
+    if s.startswith("@") or (not s.lstrip("-").isdigit() and "/" not in s and " " not in s):
+        return s.lstrip("@")
+    return None
+
+
+def _invite_preview(invite) -> dict[str, Any]:
+    out: dict[str, Any] = {"kind": type(invite).__name__}
+    if isinstance(invite, ChatInviteAlready):
+        out["already_participant"] = True
+        out["channel"] = _entity_ref(invite.chat)
+    elif isinstance(invite, (ChatInvite, ChatInvitePeek)):
+        out["already_participant"] = False
+        out["title"] = getattr(invite, "title", None)
+        out["participants"] = getattr(invite, "participants_count", None)
+        out["channel"] = bool(getattr(invite, "channel", False))
+        out["megagroup"] = bool(getattr(invite, "megagroup", False))
+        out["request_needed"] = bool(getattr(invite, "request_needed", False))
+    return out
 
 # ── Message rendering helpers ──────────────────────────────────────
 
@@ -477,9 +552,6 @@ async def telegram_press_button(
                                "dry_run": bool(dry_run), "action": action}
         if dry_run:
             return res
-        if kind in ("url", "webapp", "url_auth"):
-            res["result"] = {"link": info.get("url")}
-            return res
         if kind != "callback":
             raise ValueError(f"pressing buttons of kind {kind!r} is not supported")
         raw = chosen["_raw"]
@@ -495,6 +567,283 @@ async def telegram_press_button(
                 out[k] = v
         res["result"] = out or {"answer": "empty"}
         return res
+
+
+
+
+def _folder_title(f) -> str:
+    t = getattr(f, "title", None)
+    if t is None:
+        return ""
+    if isinstance(t, str):
+        return t
+    return getattr(t, "text", None) or str(t)
+
+
+def _peer_ids(p) -> dict[str, Any]:
+    name = type(p).__name__
+    if "User" in name:
+        return {"kind": "user", "id": getattr(p, "user_id", None)}
+    if "Channel" in name:
+        return {"kind": "channel", "id": getattr(p, "channel_id", None)}
+    if "Chat" in name:
+        return {"kind": "chat", "id": getattr(p, "chat_id", None)}
+    return {"kind": name}
+
+
+def _peer_match(p, input_peer) -> bool:
+    a, b = _peer_ids(p), _peer_ids(input_peer)
+    return a.get("kind") == b.get("kind") and a.get("id") is not None and a.get("id") == b.get("id")
+
+
+def _as_text_title(title) -> TextWithEntities:
+    if isinstance(title, TextWithEntities):
+        return title
+    if isinstance(title, str):
+        return TextWithEntities(text=title, entities=[])
+    text_v = getattr(title, "text", None) or str(title)
+    entities = list(getattr(title, "entities", None) or [])
+    return TextWithEntities(text=text_v, entities=entities)
+
+
+async def _get_dialog_filters(c) -> list:
+    res = await c(GetDialogFiltersRequest())
+    return list(getattr(res, "filters", None) or [])
+
+
+async def _find_folder(c, folder: str) -> DialogFilter:
+    folder = (folder or "").strip()
+    if not folder:
+        raise ValueError("folder is required (id or title)")
+    found: list[DialogFilter] = []
+    for f in await _get_dialog_filters(c):
+        if not isinstance(f, DialogFilter):
+            continue
+        if str(f.id) == folder or _folder_title(f).casefold() == folder.casefold():
+            found.append(f)
+    if not found:
+        raise ValueError(f"folder not found: {folder}")
+    if len(found) > 1:
+        raise ValueError(
+            "ambiguous folder title; use id: "
+            + ", ".join(f"{_folder_title(f)} ({f.id})" for f in found)
+        )
+    return found[0]
+
+
+def _folder_summary(f: DialogFilter, *, with_peers: bool = False) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "id": f.id,
+        "title": _folder_title(f),
+        "emoticon": getattr(f, "emoticon", None),
+        "include_count": len(f.include_peers or []),
+        "exclude_count": len(f.exclude_peers or []),
+        "pinned_count": len(f.pinned_peers or []),
+        "flags": {
+            "contacts": bool(f.contacts),
+            "non_contacts": bool(f.non_contacts),
+            "groups": bool(f.groups),
+            "broadcasts": bool(f.broadcasts),
+            "bots": bool(f.bots),
+            "exclude_muted": bool(f.exclude_muted),
+            "exclude_read": bool(f.exclude_read),
+            "exclude_archived": bool(f.exclude_archived),
+        },
+    }
+    if with_peers:
+        out["include_peers"] = [_peer_ids(p) for p in (f.include_peers or [])]
+        out["exclude_peers"] = [_peer_ids(p) for p in (f.exclude_peers or [])]
+        out["pinned_peers"] = [_peer_ids(p) for p in (f.pinned_peers or [])]
+    return out
+
+
+def _rebuild_folder(
+    f: DialogFilter,
+    *,
+    include_peers=None,
+    exclude_peers=None,
+    pinned_peers=None,
+) -> DialogFilter:
+    return DialogFilter(
+        id=f.id,
+        title=_as_text_title(f.title),
+        pinned_peers=list(f.pinned_peers if pinned_peers is None else pinned_peers),
+        include_peers=list(f.include_peers if include_peers is None else include_peers),
+        exclude_peers=list(f.exclude_peers if exclude_peers is None else exclude_peers),
+        contacts=f.contacts,
+        non_contacts=f.non_contacts,
+        groups=f.groups,
+        broadcasts=f.broadcasts,
+        bots=f.bots,
+        exclude_muted=f.exclude_muted,
+        exclude_read=f.exclude_read,
+        exclude_archived=f.exclude_archived,
+        title_noanimate=getattr(f, "title_noanimate", None),
+        emoticon=f.emoticon,
+        color=getattr(f, "color", None),
+    )
+
+
+# ── Membership ─────────────────────────────────────────────────────
+
+@mcp.tool(
+    description=(
+        "Join a public channel/supergroup (@username or t.me/name) or an invite link "
+        "(t.me/+hash / t.me/joinchat/hash). "
+        "Private invites that need admin approval return request_needed."
+    )
+)
+async def telegram_join_channel(channel: str) -> dict[str, Any]:
+    log.info("tool telegram_join_channel start channel=%s", channel)
+    channel = (channel or "").strip()
+    if not channel:
+        raise ValueError("channel is required")
+    inv = _invite_hash(channel)
+    async with tg_client.client() as c:
+        if inv:
+            preview = await c(CheckChatInviteRequest(hash=inv))
+            if isinstance(preview, ChatInviteAlready):
+                return {
+                    "joined": False,
+                    "already_participant": True,
+                    "via": "invite",
+                    "channel": _entity_ref(preview.chat),
+                }
+            updates = await c(ImportChatInviteRequest(hash=inv))
+            chats = getattr(updates, "chats", None) or []
+            entity = chats[0] if chats else None
+            return {
+                "joined": True,
+                "via": "invite",
+                "channel": _entity_ref(entity) if entity else None,
+                "request_needed": bool(getattr(preview, "request_needed", False)),
+            }
+        uname = _public_username(channel)
+        target = uname if uname else await _resolve(c, channel)
+        if target == "me":
+            raise ValueError("cannot join Saved Messages")
+        entity = await c.get_entity(target)
+        ref = _entity_ref(entity)
+        await c(JoinChannelRequest(entity))
+        return {"joined": True, "via": "public", "channel": ref}
+
+
+@mcp.tool(
+    description=(
+        "Leave a channel or group (username/@handle/numeric id / t.me link). "
+        "Does not delete the chat history."
+    )
+)
+async def telegram_leave_channel(channel: str) -> dict[str, Any]:
+    log.info("tool telegram_leave_channel start channel=%s", channel)
+    channel = (channel or "").strip()
+    if not channel:
+        raise ValueError("channel is required")
+    uname = _public_username(channel)
+    async with tg_client.client() as c:
+        target = uname if uname else await _resolve(c, channel)
+        if target == "me":
+            raise ValueError("cannot leave Saved Messages")
+        entity = await c.get_entity(target)
+        ref = _entity_ref(entity)
+        if isinstance(entity, Channel):
+            await c(LeaveChannelRequest(entity))
+        elif isinstance(entity, Chat):
+            await c(DeleteChatUserRequest(chat_id=entity.id, user_id=InputUserSelf()))
+        else:
+            raise ValueError(f"cannot leave entity type {type(entity).__name__}")
+        return {"left": True, "channel": ref}
+
+
+
+@mcp.tool(
+    description=(
+        "List Telegram chat folders (dialog filters): id, title, include/exclude/pinned counts. "
+        "with_peers=true also lists peer ids (no access hashes). "
+        "DialogFilterDefault (All chats) is omitted."
+    )
+)
+async def telegram_list_folders(with_peers: bool = False) -> dict[str, Any]:
+    log.info("tool telegram_list_folders start with_peers=%s", with_peers)
+    async with tg_client.client() as c:
+        folders = [
+            _folder_summary(f, with_peers=with_peers)
+            for f in await _get_dialog_filters(c)
+            if isinstance(f, DialogFilter)
+        ]
+        return {"count": len(folders), "folders": folders}
+
+
+@mcp.tool(
+    description=(
+        "Add a chat to a folder's include list (and remove it from exclude/pinned if present). "
+        "folder: id or title (e.g. Job, Personal). chat: username/@handle/id."
+    )
+)
+async def telegram_folder_include(folder: str, chat: str) -> dict[str, Any]:
+    log.info(
+        "tool telegram_folder_include start folder=%s chat=%s",
+        folder, chat,
+    )
+    async with tg_client.client() as c:
+        f = await _find_folder(c, folder)
+        target = await _resolve(c, chat)
+        entity = await c.get_entity(target)
+        inp = await c.get_input_entity(entity)
+        ref = (
+            {"id": "me", "name": "Saved Messages", "type": "saved"}
+            if target == "me"
+            else _entity_ref(entity)
+        )
+        include = [p for p in (f.include_peers or []) if not _peer_match(p, inp)]
+        exclude = [p for p in (f.exclude_peers or []) if not _peer_match(p, inp)]
+        pinned = [p for p in (f.pinned_peers or []) if not _peer_match(p, inp)]
+        already = len(include) != len(f.include_peers or [])
+        include.append(inp)
+        new_f = _rebuild_folder(f, include_peers=include, exclude_peers=exclude, pinned_peers=pinned)
+        await c(UpdateDialogFilterRequest(id=new_f.id, filter=new_f))
+        return {
+            "updated": True,
+            "folder": _folder_summary(new_f),
+            "chat": ref,
+            "already_included": already,
+        }
+
+
+@mcp.tool(
+    description=(
+        "Add a chat to a folder's exclude list (and remove it from include/pinned if present). "
+        "folder: id or title. chat: username/@handle/id."
+    )
+)
+async def telegram_folder_exclude(folder: str, chat: str) -> dict[str, Any]:
+    log.info(
+        "tool telegram_folder_exclude start folder=%s chat=%s",
+        folder, chat,
+    )
+    async with tg_client.client() as c:
+        f = await _find_folder(c, folder)
+        target = await _resolve(c, chat)
+        entity = await c.get_entity(target)
+        inp = await c.get_input_entity(entity)
+        ref = (
+            {"id": "me", "name": "Saved Messages", "type": "saved"}
+            if target == "me"
+            else _entity_ref(entity)
+        )
+        include = [p for p in (f.include_peers or []) if not _peer_match(p, inp)]
+        exclude = [p for p in (f.exclude_peers or []) if not _peer_match(p, inp)]
+        pinned = [p for p in (f.pinned_peers or []) if not _peer_match(p, inp)]
+        already = len(exclude) != len(f.exclude_peers or [])
+        exclude.append(inp)
+        new_f = _rebuild_folder(f, include_peers=include, exclude_peers=exclude, pinned_peers=pinned)
+        await c(UpdateDialogFilterRequest(id=new_f.id, filter=new_f))
+        return {
+            "updated": True,
+            "folder": _folder_summary(new_f),
+            "chat": ref,
+            "already_excluded": already,
+        }
 
 
 # ── Write ──────────────────────────────────────────────────────────
