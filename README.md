@@ -88,7 +88,7 @@ Connect in Grok Bot (AddMcpServer):
 
 - **command:** `/workspace/telegram-mcp/mcp_launch.sh`
 - **args:** `[]`
-- **name:** `grokbot-telegram-mcp`
+- **name:** `Telegram`
 
 ## Files
 
