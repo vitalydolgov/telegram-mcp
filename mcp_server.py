@@ -5,7 +5,8 @@ Coherent MVP tool set:
   Auth:    telegram_whoami, telegram_login_qr, telegram_login_2fa, telegram_logout
   Read:    telegram_list_dialogs, telegram_get_messages, telegram_mark_read
   Buttons: telegram_press_button
-  Write:   telegram_send_message, telegram_send_file
+  Write:   telegram_send_message, telegram_send_message_mimic,
+           telegram_send_file, telegram_send_file_mimic
   Membership: telegram_join_channel, telegram_leave_channel
   Folders: telegram_list_folders, telegram_folder_include, telegram_folder_exclude
 
@@ -54,13 +55,14 @@ mcp = MCPServer(
         "(→ telegram_login_2fa if need_2fa) → telegram_logout. "
         "Read: telegram_list_dialogs, telegram_get_messages, telegram_mark_read. "
         "Buttons: telegram_press_button (callback presses with explicit user consent; url/webapp return url only, never opened). "
-        "Write: telegram_send_message, telegram_send_file (local file + optional caption). "
+        "Write: telegram_send_message, telegram_send_message_mimic (no bot marker), "
+        "telegram_send_file, telegram_send_file_mimic (local file + optional caption, no bot marker). "
         "Membership: telegram_join_channel / telegram_leave_channel "
         "(public @username, t.me link, or invite t.me/+hash). "
         "Folders: telegram_list_folders; telegram_folder_include / telegram_folder_exclude "
         "(folder id or title). "
         "chat: username, @handle, numeric id, or 'me'. Times Europe/Moscow. "
-        "robot_prefix_enabled in config.json prefixes every send. "
+        "robot_prefix_enabled in config.json prefixes standard sends (*_mimic tools skip it). "
         "Secrets only via env (TG_API_ID, TG_API_HASH, optional TG_2FA_PASSWORD)."
     ),
 )
@@ -855,18 +857,13 @@ async def telegram_folder_exclude(folder: str, chat: str) -> dict[str, Any]:
 
 # ── Write ──────────────────────────────────────────────────────────
 
-@mcp.tool(
-    description=(
-        "Send text to chat (username/@handle/id/'me'). "
-        "If config robot_prefix_enabled, prefixes robot_emoji."
-    )
-)
-async def telegram_send_message(chat: str, text: str) -> dict[str, Any]:
-    log.info("tool telegram_send_message start chat=%s text_len=%s", chat, len(str(text)) if text is not None else 0)
+async def _send_message(
+    chat: str, text: str, *, apply_robot_prefix: bool
+) -> dict[str, Any]:
     if text is None or str(text).strip() == "":
         raise ValueError("text is required")
     text = str(text)
-    final = _apply_robot_prefix(text)
+    final = _apply_robot_prefix(text) if apply_robot_prefix else text
     async with tg_client.client() as c:
         target = await _resolve(c, chat)
         entity = await c.get_entity(target)
@@ -883,6 +880,28 @@ async def telegram_send_message(chat: str, text: str) -> dict[str, Any]:
             "text": final,
             "robot_prefix_applied": final != text,
         }
+
+
+@mcp.tool(
+    description=(
+        "Send text to chat (username/@handle/id/'me'). "
+        "If config robot_prefix_enabled, prefixes robot_emoji."
+    )
+)
+async def telegram_send_message(chat: str, text: str) -> dict[str, Any]:
+    log.info("tool telegram_send_message start chat=%s text_len=%s", chat, len(str(text)) if text is not None else 0)
+    return await _send_message(chat, text, apply_robot_prefix=True)
+
+
+@mcp.tool(
+    description=(
+        "Send text to chat (username/@handle/id/'me') without the bot marker "
+        "(robot_emoji), so the message looks like the user typed it."
+    )
+)
+async def telegram_send_message_mimic(chat: str, text: str) -> dict[str, Any]:
+    log.info("tool telegram_send_message_mimic start chat=%s text_len=%s", chat, len(str(text)) if text is not None else 0)
+    return await _send_message(chat, text, apply_robot_prefix=False)
 
 
 _MAX_FILE_BYTES = 2000 * 1024 * 1024
@@ -945,25 +964,21 @@ def _check_send_path(path: str) -> str:
     return real
 
 
-@mcp.tool(
-    description=(
-        "Send a file from this machine to a chat (username/@handle/id/'me') with optional caption. "
-        "Robot prefix applies to the caption. as_document=true sends images/videos uncompressed. "
-        "Refuses var/, logs/, session files, and secret filenames. "
-        "Only send to real people with explicit user consent; tests go to 'me'."
-    )
-)
-async def telegram_send_file(
-    chat: str, path: str, caption: str = "", as_document: bool = False
+async def _send_file(
+    chat: str,
+    path: str,
+    caption: str = "",
+    as_document: bool = False,
+    *,
+    apply_robot_prefix: bool,
 ) -> dict[str, Any]:
-    log.info(
-        "tool telegram_send_file start chat=%s as_document=%s caption_len=%s",
-        chat, as_document, len(str(caption)) if caption else 0,
-    )
     real = _check_send_path(path)
     size = os.path.getsize(real)
     caption = "" if caption is None else str(caption)
-    final = _apply_robot_prefix(caption).rstrip() if caption == "" else _apply_robot_prefix(caption)
+    if apply_robot_prefix:
+        final = _apply_robot_prefix(caption).rstrip() if caption == "" else _apply_robot_prefix(caption)
+    else:
+        final = caption
     async with tg_client.client() as c:
         target = await _resolve(c, chat)
         entity = await c.get_entity(target)
@@ -984,6 +999,47 @@ async def telegram_send_file(
             "caption": final,
             "robot_prefix_applied": final != caption,
         }
+
+
+@mcp.tool(
+    description=(
+        "Send a file from this machine to a chat (username/@handle/id/'me') with optional caption. "
+        "Robot prefix applies to the caption. as_document=true sends images/videos uncompressed. "
+        "Refuses var/, logs/, session files, and secret filenames. "
+        "Only send to real people with explicit user consent; tests go to 'me'."
+    )
+)
+async def telegram_send_file(
+    chat: str, path: str, caption: str = "", as_document: bool = False
+) -> dict[str, Any]:
+    log.info(
+        "tool telegram_send_file start chat=%s as_document=%s caption_len=%s",
+        chat, as_document, len(str(caption)) if caption else 0,
+    )
+    return await _send_file(
+        chat, path, caption=caption, as_document=as_document, apply_robot_prefix=True
+    )
+
+
+@mcp.tool(
+    description=(
+        "Send a file from this machine to a chat (username/@handle/id/'me') with optional caption, "
+        "without adding the bot marker (robot_emoji) to the caption so it looks like the user sent it. "
+        "as_document=true sends images/videos uncompressed. "
+        "Refuses var/, logs/, session files, and secret filenames. "
+        "Only send to real people with explicit user consent; tests go to 'me'."
+    )
+)
+async def telegram_send_file_mimic(
+    chat: str, path: str, caption: str = "", as_document: bool = False
+) -> dict[str, Any]:
+    log.info(
+        "tool telegram_send_file_mimic start chat=%s as_document=%s caption_len=%s",
+        chat, as_document, len(str(caption)) if caption else 0,
+    )
+    return await _send_file(
+        chat, path, caption=caption, as_document=as_document, apply_robot_prefix=False
+    )
 
 
 async def _smoke() -> int:

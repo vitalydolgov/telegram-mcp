@@ -13,7 +13,7 @@ cp config.example.json config.json
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `robot_prefix_enabled` | bool | `true` | If `true`, prefix every outgoing message with the emoji |
+| `robot_prefix_enabled` | bool | `true` | If `true`, prefix outgoing messages with the emoji (`telegram_send_message_mimic` and `telegram_send_file_mimic` always skip it) |
 | `robot_emoji` | string | `"🤖"` | Which prefix (a trailing space is added if missing) |
 | `history_days` | int 1–30 | `1` | Default calendar days (Moscow) for `get_messages` (`1` = today) |
 | `timezone` | string | `"Europe/Moscow"` | Timezone for dates (fixed for now) |

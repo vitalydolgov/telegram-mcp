@@ -17,7 +17,9 @@ Path on the box: `/workspace/telegram-mcp`.
 | | `telegram_mark_read` | Mark a chat read without fetching messages. |
 | **Buttons** | `telegram_press_button` | Press a button by index or text. Callback presses the button; url/webapp buttons return the url only and are never opened. |
 | **Write** | `telegram_send_message` | Send text. With `robot_prefix_enabled`, prefixes emoji. |
-| **Write** | `telegram_send_file` | Send a local file (absolute path, <= 2000 MB) with optional caption; robot prefix on caption; `as_document` sends media uncompressed. Refuses `var/`, `logs/`, session files, and secret filenames (`.env`, keys). |
+| | `telegram_send_message_mimic` | Send text without the bot marker, so it looks like the user typed it. |
+| | `telegram_send_file` | Send a local file (absolute path, <= 2000 MB) with optional caption; robot prefix on caption; `as_document` sends media uncompressed. Refuses `var/`, `logs/`, session files, and secret filenames (`.env`, keys). |
+| | `telegram_send_file_mimic` | Same as `telegram_send_file`, without adding the bot marker to the caption so it looks like the user sent it. |
 | **Membership** | `telegram_join_channel` | Join public `@username` / `t.me/name` or invite `t.me/+hash`. |
 | | `telegram_leave_channel` | Leave channel/supergroup/basic group. |
 | **Folders** | `telegram_list_folders` | List chat folders (dialog filters): id, title, counts; `with_peers` lists peer ids. |
@@ -33,7 +35,7 @@ Path on the box: `/workspace/telegram-mcp`.
 1. **First login:** `login_qr` → scan `var/qr/login.png` → if `need_2fa` → set `TG_2FA_PASSWORD` in env → `login_2fa` → `whoami`.
 2. **Read today's chat:** `get_messages(chat=…)` (default `history_days=1`). To mark read: `mark_read=true`.
 3. **Clear unread only:** `mark_read(chat=…)`.
-4. **Send:** `send_message(chat=…, text=…)`. Default tests go to `me`.
+4. **Send:** `send_message(chat=…, text=…)` (or `send_message_mimic` / `send_file_mimic` without the bot marker). Default tests go to `me`.
 5. **Leave account:** `logout`.
 6. **Join / leave channel:** `join_channel(channel=…)` / `leave_channel(channel=…)`.
 7. **Folders:** `list_folders` → `folder_include` / `folder_exclude`.
@@ -54,7 +56,7 @@ Field details: [CONFIG.md](CONFIG.md). Summary:
 
 | Field | Default | Meaning |
 |-------|---------|---------|
-| `robot_prefix_enabled` | `true` | Prefix every outgoing message |
+| `robot_prefix_enabled` | `true` | Prefix outgoing messages (`*_mimic` tools always skip it) |
 | `robot_emoji` | `🤖` | Which prefix |
 | `history_days` | `1` | Default window for `get_messages` (1 = today Moscow) |
 | `timezone` | `Europe/Moscow` | Timezone for dates (fixed for now) |
