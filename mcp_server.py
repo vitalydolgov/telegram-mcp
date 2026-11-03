@@ -62,7 +62,7 @@ mcp = MCPServer(
         "Folders: telegram_list_folders; telegram_folder_include / telegram_folder_exclude "
         "(folder id or title). "
         "chat: username, @handle, numeric id, or 'me'. Times Europe/Moscow. "
-        "robot_prefix_enabled in config.json prefixes standard sends (*_mimic tools skip it). "
+        "Standard sends prefix robot_emoji from config.json (*_mimic tools skip it). "
         "Secrets only via env (TG_API_ID, TG_API_HASH, optional TG_2FA_PASSWORD)."
     ),
 )
@@ -99,8 +99,6 @@ def _entity_ref(entity) -> dict[str, Any]:
 
 def _apply_robot_prefix(text: str) -> str:
     cfg = tg_settings.load()
-    if not cfg.get("robot_prefix_enabled", True):
-        return text
     emoji = (cfg.get("robot_emoji") or "🤖").strip() or "🤖"
     prefix = emoji if emoji.endswith(" ") else emoji + " "
     if text.startswith(prefix) or text.startswith(emoji):
@@ -885,7 +883,7 @@ async def _send_message(
 @mcp.tool(
     description=(
         "Send text to chat (username/@handle/id/'me'). "
-        "If config robot_prefix_enabled, prefixes robot_emoji."
+        "Prefixes robot_emoji."
     )
 )
 async def telegram_send_message(chat: str, text: str) -> dict[str, Any]:

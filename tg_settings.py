@@ -9,7 +9,6 @@ CONFIG_PATH = os.path.join(BASE, "config.json")
 SESSION_PATH = os.path.join(PRIV, "me.session")
 
 DEFAULTS: dict[str, Any] = {
-    "robot_prefix_enabled": True,
     "robot_emoji": "🤖",
     "history_days": 1,
     "timezone": "Europe/Moscow",
@@ -22,8 +21,6 @@ def load() -> dict[str, Any]:
             raw = json.load(f)
         if "robot_prefix" in raw and isinstance(raw["robot_prefix"], dict):
             rp = raw["robot_prefix"]
-            if "enabled" in rp:
-                data["robot_prefix_enabled"] = bool(rp["enabled"])
             if rp.get("emoji"):
                 data["robot_emoji"] = str(rp["emoji"])
         if "defaults" in raw and isinstance(raw["defaults"], dict):
@@ -32,7 +29,6 @@ def load() -> dict[str, Any]:
         for k in DEFAULTS:
             if k in raw:
                 data[k] = raw[k]
-    data["robot_prefix_enabled"] = bool(data.get("robot_prefix_enabled", True))
     data["robot_emoji"] = (str(data.get("robot_emoji") or "🤖").strip() or "🤖")
     data["history_days"] = max(1, min(int(data.get("history_days") or 1), 30))
     data["timezone"] = "Europe/Moscow"
@@ -40,7 +36,6 @@ def load() -> dict[str, Any]:
 
 def save(data: dict[str, Any]) -> dict[str, Any]:
     clean = {
-        "robot_prefix_enabled": bool(data.get("robot_prefix_enabled", True)),
         "robot_emoji": (str(data.get("robot_emoji") or "🤖").strip() or "🤖")[:8],
         "history_days": max(1, min(int(data.get("history_days") or 1), 30)),
         "timezone": "Europe/Moscow",
