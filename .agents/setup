@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+step() {
+  printf '==> %s\n' "$*"
+}
+
+t0=$SECONDS
+step "Ensuring Python virtual environment (.venv)"
+if [[ ! -x .venv/bin/python ]]; then
+  if command -v uv >/dev/null 2>&1; then
+    uv venv .venv
+  else
+    python3 -m venv .venv
+  fi
+fi
+
+step "Installing Python dependencies from requirements.txt"
+if command -v uv >/dev/null 2>&1; then
+  uv pip install --python .venv/bin/python -r requirements.txt
+else
+  .venv/bin/pip install --disable-pip-version-check -q -r requirements.txt
+fi
+
+step "Ensuring local config.json from template"
+[[ -f config.json ]] || cp -- config.example.json config.json
+
+step "Verifying Python modules and dependencies"
+.venv/bin/python -m py_compile mcp_server.py tg_auth.py tg_client.py tg_log.py tg_settings.py tg_wss.py
+.venv/bin/python -c "import cryptg, mcp, PIL, qrcode, telethon, websockets"
+
+printf '==> Setup completed in %ds\n' "$((SECONDS - t0))"
