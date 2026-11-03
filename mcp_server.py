@@ -56,7 +56,8 @@ mcp = MCPServer(
         "Read: telegram_list_dialogs, telegram_get_messages, telegram_mark_read. "
         "Buttons: telegram_press_button (callback presses with explicit user consent; url/webapp return url only, never opened). "
         "Write: telegram_send_message, telegram_send_message_mimic (no bot marker), "
-        "telegram_send_file, telegram_send_file_mimic (local file + optional caption, no bot marker). "
+        "telegram_send_file, telegram_send_file_mimic "
+        "(one message: local file plus its text in caption; *_mimic skips the bot marker). "
         "Membership: telegram_join_channel / telegram_leave_channel "
         "(public @username, t.me link, or invite t.me/+hash). "
         "Folders: telegram_list_folders; telegram_folder_include / telegram_folder_exclude "
@@ -903,6 +904,9 @@ async def telegram_send_message_mimic(chat: str, text: str) -> dict[str, Any]:
 
 
 _MAX_FILE_BYTES = 2000 * 1024 * 1024
+# Telegram client config: caption_length_limit_default / _premium, counted in UTF-8 bytes.
+_CAPTION_UTF8_DEFAULT = 1024
+_CAPTION_UTF8_PREMIUM = 4096
 _VAR_DIR = os.path.realpath(os.path.join(_BASE, "var"))
 _LOG_DIR = os.path.realpath(os.path.join(_BASE, "logs"))
 _SECRET_NAMES = {
@@ -962,6 +966,23 @@ def _check_send_path(path: str) -> str:
     return real
 
 
+def _check_caption(caption: str) -> str | None:
+    """Reject past the Premium cap. Warn when a free account would be refused."""
+    n = len(caption.encode("utf-8"))
+    if n > _CAPTION_UTF8_PREMIUM:
+        raise ValueError(
+            f"caption is {n} UTF-8 bytes; Telegram allows at most "
+            f"{_CAPTION_UTF8_PREMIUM} (Premium) or {_CAPTION_UTF8_DEFAULT} (free). "
+            "Send the long text with telegram_send_message instead of a second caption."
+        )
+    if n > _CAPTION_UTF8_DEFAULT:
+        return (
+            f"caption is {n} UTF-8 bytes; a free account allows "
+            f"{_CAPTION_UTF8_DEFAULT}. Premium allows {_CAPTION_UTF8_PREMIUM}."
+        )
+    return None
+
+
 async def _send_file(
     chat: str,
     path: str,
@@ -977,6 +998,7 @@ async def _send_file(
         final = _apply_robot_prefix(caption).rstrip() if caption == "" else _apply_robot_prefix(caption)
     else:
         final = caption
+    caption_note = _check_caption(final)
     async with tg_client.client() as c:
         target = await _resolve(c, chat)
         entity = await c.get_entity(target)
@@ -996,13 +1018,17 @@ async def _send_file(
             "media_kind": med.get("kind"),
             "caption": final,
             "robot_prefix_applied": final != caption,
-        }
+        } | ({"caption_note": caption_note} if caption_note else {})
 
 
 @mcp.tool(
     description=(
-        "Send a file from this machine to a chat (username/@handle/id/'me') with optional caption. "
-        "Robot prefix applies to the caption. as_document=true sends images/videos uncompressed. "
+        "Send one message: a local file plus its text. Put the message text in caption "
+        "(optional; omit for a file with no text). Do not also call telegram_send_message. "
+        "chat: username/@handle/id/'me'. Robot prefix applies to caption. "
+        "as_document=true sends images/videos uncompressed. "
+        "Caption limit is 1024 UTF-8 bytes (4096 with Premium); longer text is refused "
+        "before upload — use telegram_send_message for a long body, which is a second message. "
         "Refuses var/, logs/, session files, and secret filenames. "
         "Only send to real people with explicit user consent; tests go to 'me'."
     )
@@ -1021,9 +1047,12 @@ async def telegram_send_file(
 
 @mcp.tool(
     description=(
-        "Send a file from this machine to a chat (username/@handle/id/'me') with optional caption, "
-        "without adding the bot marker (robot_emoji) to the caption so it looks like the user sent it. "
-        "as_document=true sends images/videos uncompressed. "
+        "Send one message: a local file plus its text, without the bot marker (robot_emoji), "
+        "so it looks like the user sent it. Put the message text in caption "
+        "(optional; omit for a file with no text). Do not also call telegram_send_message. "
+        "chat: username/@handle/id/'me'. as_document=true sends images/videos uncompressed. "
+        "Caption limit is 1024 UTF-8 bytes (4096 with Premium); longer text is refused "
+        "before upload — use telegram_send_message for a long body, which is a second message. "
         "Refuses var/, logs/, session files, and secret filenames. "
         "Only send to real people with explicit user consent; tests go to 'me'."
     )

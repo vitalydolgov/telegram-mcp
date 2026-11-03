@@ -18,7 +18,7 @@ Path on the box: `/workspace/telegram-mcp`.
 | **Buttons** | `telegram_press_button` | Press a button by index or text. Callback presses the button; url/webapp buttons return the url only and are never opened. |
 | **Write** | `telegram_send_message` | Send text. Prefixes `robot_emoji`. |
 | | `telegram_send_message_mimic` | Send text without the bot marker, so it looks like the user typed it. |
-| | `telegram_send_file` | Send a local file (absolute path, <= 2000 MB) with optional caption; robot prefix on caption; `as_document` sends media uncompressed. Refuses `var/`, `logs/`, session files, and secret filenames (`.env`, keys). |
+| | `telegram_send_file` | One message: local file (absolute path, <= 2000 MB) plus its text in `caption` (optional). Do not also call `telegram_send_message`. Robot prefix applies to `caption`. Caption limit 1024 UTF-8 bytes (4096 with Premium); longer text is refused before upload. `as_document` sends media uncompressed. Refuses `var/`, `logs/`, session files, and secret filenames (`.env`, keys). |
 | | `telegram_send_file_mimic` | Same as `telegram_send_file`, without adding the bot marker to the caption so it looks like the user sent it. |
 | **Membership** | `telegram_join_channel` | Join public `@username` / `t.me/name` or invite `t.me/+hash`. |
 | | `telegram_leave_channel` | Leave channel/supergroup/basic group. |
@@ -35,7 +35,7 @@ Path on the box: `/workspace/telegram-mcp`.
 1. **First login:** `login_qr` → scan `var/qr/login.png` → if `need_2fa` → set `TG_2FA_PASSWORD` in env → `login_2fa` → `whoami`.
 2. **Read today's chat:** `get_messages(chat=…)` (default `history_days=1`). To mark read: `mark_read=true`.
 3. **Clear unread only:** `mark_read(chat=…)`.
-4. **Send:** `send_message(chat=…, text=…)` (or `send_message_mimic` / `send_file_mimic` without the bot marker). Default tests go to `me`.
+4. **Send text:** `send_message(chat=…, text=…)` (or `send_message_mimic` without the bot marker). **Send a file, with or without text:** `send_file(chat=…, path=…, caption=…)` — the caption is the message; do not also call `send_message`. `send_file_mimic` skips the bot marker. Default tests go to `me`.
 5. **Leave account:** `logout`.
 6. **Join / leave channel:** `join_channel(channel=…)` / `leave_channel(channel=…)`.
 7. **Folders:** `list_folders` → `folder_include` / `folder_exclude`.
@@ -112,7 +112,7 @@ Connect in Grok Bot (AddMcpServer):
 
 ## MVP limits
 
-- Text only (media in history shows as `[media]`).
+- History shows media as kind/caption, not a downloaded file.
 - No broadcasts, no Bot API.
 - Do not message real people without explicit consent; tests go to Saved Messages (`me`).
 - Respect Telegram rate limits.
